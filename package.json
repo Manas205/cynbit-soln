@@ -1,0 +1,30 @@
+{
+  "name": "cynbit-solution-finder",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A standalone, accessible solution discovery and inquiry prototype for Cynbit.",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "dev": "tsx server/server.ts",
+    "build": "tsc --noEmit && vite build",
+    "start": "tsx server/server.ts --production",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tsx": "^4.20.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.1.0"
+  }
+}
