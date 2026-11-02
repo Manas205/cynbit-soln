@@ -49,6 +49,36 @@ The inquiry screen shows the attached brief and allows another review before sav
 
 Starting the updated server automatically adds the nullable `project_brief_json` column to an existing inquiry database. Existing records remain intact with a null brief. New briefs store their version, solution, and structured answers in that column; the original finder answers remain in `answers_json`. Restart any already-running server after updating so the migration and API changes take effect.
 
+## Interactive Case-Study Explorer
+
+Choose **Case studies** in the public navigation or open `/#case-studies`. Four clearly labeled demonstrations cover a service portal, connected inventory, invoice review automation, and a support knowledge assistant. Each includes an industry, business problem, proposed solution, challenge, approach, potential deliverables, and an explicit **Verified results: not available** section. The diagrams illustrate concepts; they are not screenshots of delivered client projects.
+
+Search matches all entered words across titles, industries, service names, summaries, problems, solutions, and deliverables. Combine search with a service filter and an industry filter. Empty results offer a reset. Gallery filters remain in memory while opening details and returning; browser Back/Forward and shareable links such as `/#case-studies/invoice-review-workflow` work without adding a router dependency. Filters reset on refresh.
+
+Software and AI recommendations show two examples from the selected service, ordered by overlap with the visitor’s priorities. Changing the selected solution updates these matches. Services without examples show an honest fallback and a link to the collection.
+
+**Start a similar project** opens the existing brief builder with the example’s service. **Prepare a quick inquiry** opens the existing inquiry form. Compatible Finder answers and brief drafts are preserved. Otherwise, the page explains the editable starting defaults before the button: the example’s priorities, “Exploring possibilities,” and “Just researching.” Project fields start empty; demonstration problems and outcomes are never copied into a visitor’s brief. Switching away from an active incompatible brief asks before replacing it. A completed inquiry starts a fresh brief.
+
+An optional validated `sourceCaseStudyId` travels inside the finder answers, saved brief context, inquiry record, admin detail, and text export. This metadata never bypasses the existing recommendation validation; the source’s service must match the inquiry’s selected service. Changing goals or priorities clears stale source metadata. Refresh recovery follows the existing project-brief rules.
+
+### Content and approval
+
+The collection lives in `shared/caseStudies.ts`. The initial version deliberately supports demonstration content only. None of these scenarios is evidence that Cynbit delivered a client project, and no client names, testimonials, performance numbers, or approvals are invented. All measurement suggestions describe future evaluation, not achieved results.
+
+Before publishing real case studies, obtain approval for the client identity (or agreed anonymization), project description, deliverables, and each result. Keep supporting sources, measurement periods, baselines, and limitations. Add an explicit approved-content model and evidence display at that point; do not simply remove a demonstration label or rename a metric into a result.
+
+### Activity tracking
+
+`POST /api/case-study-events` accepts strict JSON `{ id, caseStudyId, type, source }`. `id` is a UUID, `type` is `view`, `brief_start`, or `inquiry_start`, and `source` is `gallery` or `recommendation`. Unknown examples, fields, event types, and sources are rejected. The request limit is 2 KB, cross-origin browser writes are blocked, and a separate process-local limit allows 120 events per socket address per 15 minutes. A repeated identical ID counts once; reusing it for different data returns 409.
+
+Startup adds an independent `case_study_events` table without modifying existing inquiries. It stores only the event ID, example ID, action, entry point, and server timestamp. It stores no IP, contact details, search terms, visitor identifier, or cookies. Socket addresses are used only by the in-memory limiter. Events remain until the operator deletes them; use an appropriate retention policy before public deployment.
+
+Views count detail openings, including direct links and later revisits. Brief and inquiry starts are counted once per example/action during the mounted public flow, including returning from a detail to a matching recommendation; a reload or “Start over” begins a new flow. An inquiry start after completing a brief also counts. These are recorded actions, not unique visitors, completed inquiries, or a deduplicated conversion funnel. Counts can be affected by blocked requests, refreshes, and automation. Tracking is best effort and never delays navigation or submission.
+
+Authenticated admins can open **Case-study activity** in the dashboard to see all-time views, brief starts, and inquiry starts for every example, including zeros. **Refresh activity** reloads the counts. `GET /api/admin/case-study-analytics` uses the same admin session and origin protection as the inquiry inbox, returns aggregate counts only, and is unavailable to public visitors. Restart an older running server to activate the new API routes; frontend hot reload alone does not update the Node server.
+
+Case-study tests cover combined filters, empty results, relevance ordering, service handoff, blank brief content, draft recovery, source validation, complete inquiry persistence, idempotent events, body/origin/rate limits, authenticated metrics, and database reopening. Browser verification should cover mobile layouts and the complete gallery → detail → brief → inquiry flow, alongside a recommendation → detail → quick-inquiry flow.
+
 ## Admin Inquiry Dashboard
 
 Open **Admin workspace** in the Solution Finder footer, or visit `/admin` directly. The dashboard reads the same saved inquiries and project briefs as the public flow. It includes an inbox, contact details, both brief types, quick inquiries without a brief, discovery context, status totals, search, filters, and internal notes.

@@ -5,9 +5,11 @@ import { answersSchema, inquirySchema, recommend } from '../shared/recommend.ts'
 import { solutions } from '../shared/catalog.ts';
 import { body, HttpError, json } from './http.ts';
 import { createAdminApi, type AdminOptions } from './adminApi.ts';
+import { createCaseStudyTracker } from './caseStudyApi.ts';
 
 export function createApi(db: DatabaseSync, adminOptions: AdminOptions = {}) {
   const admin = createAdminApi(db, adminOptions);
+  const track = createCaseStudyTracker(db);
   const attempts = new Map<string, { count: number; resets: number }>();
   const lookup = db.prepare(
     'SELECT id, selected_solution, created_at, payload_hash FROM inquiries WHERE request_key = ?',
@@ -23,7 +25,7 @@ export function createApi(db: DatabaseSync, adminOptions: AdminOptions = {}) {
       if (path.startsWith('/api/admin/')) return await admin(req, res);
       if (req.method === 'GET' && path === '/api/health')
         return json(res, 200, { status: 'ok', mode: 'assessment-prototype' });
-      if (!['/api/recommend', '/api/inquiries'].includes(path))
+      if (!['/api/recommend', '/api/inquiries', '/api/case-study-events'].includes(path))
         return json(res, 404, { error: 'Endpoint not found.' });
       if (req.method !== 'POST') {
         res.setHeader('Allow', 'POST');
@@ -39,7 +41,10 @@ export function createApi(db: DatabaseSync, adminOptions: AdminOptions = {}) {
         if (originHost !== req.headers.host)
           return json(res, 403, { error: 'This request must come from the Solution Finder.' });
       }
-      const input = await body(req);
+      if (path === '/api/case-study-events' && req.headers['sec-fetch-site'] === 'cross-site')
+        return json(res, 403, { error: 'This request must come from the Solution Finder.' });
+      const input = await body(req, path === '/api/case-study-events' ? 2048 : undefined);
+      if (path === '/api/case-study-events') return track(req, res, input);
       if (path === '/api/recommend') {
         const parsed = answersSchema.safeParse(input);
         if (!parsed.success)

@@ -12,6 +12,7 @@ import {
 } from '../shared/admin.ts';
 import { type AdminCredentials, verifyPassword } from './adminAuth.ts';
 import { body, HttpError, json } from './http.ts';
+import { caseStudyMetrics } from './caseStudyApi.ts';
 
 export interface AdminOptions {
   credentials?: AdminCredentials;
@@ -123,6 +124,8 @@ export function createAdminApi(db: DatabaseSync, options: AdminOptions) {
       });
     }
     if (!session) throw new HttpError(401, 'Your session has ended. Sign in again to continue.');
+    if (path === '/api/admin/case-study-analytics' && req.method === 'GET')
+      return json(res, 200, { items: caseStudyMetrics(db) });
     if (req.method !== 'GET' && req.headers['x-csrf-token'] !== session.csrfToken)
       throw new HttpError(403, 'Refresh the dashboard and try again.');
     if (path === '/api/admin/session' && req.method === 'DELETE') {

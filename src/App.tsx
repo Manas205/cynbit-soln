@@ -34,6 +34,13 @@ import {
   type Recommendation,
 } from '../shared/recommend.ts';
 import { Icon } from './icons.tsx';
+import CaseStudyExplorer, {
+  RecommendedStudies,
+  studyHref,
+  type StudySource,
+} from './CaseStudyExplorer.tsx';
+import { caseStudyContext, trackCaseStudy } from './caseStudyFlow.ts';
+import { findCaseStudy, type CaseStudy } from '../shared/caseStudies.ts';
 import ProjectBriefBuilder, { BriefPreview } from './ProjectBriefBuilder.tsx';
 import {
   createProjectBrief,
@@ -68,6 +75,7 @@ function readDraft(): DraftAnswers {
       needs: selected.includes('unsure') ? ['unsure'] : selected,
       stage: stages.some((s) => s.id === raw.stage) ? raw.stage : undefined,
       timeline: timelines.some((t) => t.id === raw.timeline) ? raw.timeline : 'research',
+      ...(findCaseStudy(raw.sourceCaseStudyId) ? { sourceCaseStudyId: raw.sourceCaseStudyId } : {}),
     };
   } catch {
     return { ...emptyAnswers };
@@ -112,6 +120,10 @@ type Contact = { name: string; email: string; company: string; message: string; 
 const emptyContact: Contact = { name: '', email: '', company: '', message: '', consent: false };
 
 export default function App() {
+  const [route, setRoute] = useState(() => window.location.hash);
+  const exploringCases = route.startsWith('#case-studies');
+  const lastStudy = useRef<{ study: CaseStudy; source: StudySource } | null>(null);
+  const continuations = useRef(new Set<string>());
   const [initialBrief] = useState(() => {
     const saved = readBriefDraft();
     const finder = answersSchema.safeParse(readDraft());
@@ -152,6 +164,73 @@ export default function App() {
       : null;
   const validatedBrief = projectBriefSchema.safeParse(activeBrief?.brief);
   const attachedBrief = includeBrief && validatedBrief.success ? validatedBrief.data : undefined;
+  const sourceStudy = findCaseStudy(answers.sourceCaseStudyId);
+
+  useEffect(() => {
+    if (sourceStudy && sourceStudy.service !== selected)
+      setAnswers((current) => ({ ...current, sourceCaseStudyId: undefined }));
+  }, [selected, sourceStudy]);
+
+  useEffect(() => {
+    const changed = () => setRoute(window.location.hash);
+    window.addEventListener('hashchange', changed);
+    return () => window.removeEventListener('hashchange', changed);
+  }, []);
+
+  function trackContinuation(
+    type: 'brief_start' | 'inquiry_start',
+    study = lastStudy.current?.study || sourceStudy,
+    source = lastStudy.current?.source || 'gallery',
+  ) {
+    if (!study || study.service !== selected) return;
+    const key = `${study.id}:${type}`;
+    if (continuations.current.has(key)) return;
+    continuations.current.add(key);
+    trackCaseStudy({ caseStudyId: study.id, type, source });
+  }
+
+  function startSimilar(study: CaseStudy, destination: 'brief' | 'inquiry', source: StudySource) {
+    const context = caseStudyContext(study, answers);
+    const keepBrief =
+      !receipt &&
+      activeBrief &&
+      activeBrief.brief.solution === study.service &&
+      sameBriefIntent(activeBrief.answers, context);
+    if (
+      !receipt &&
+      activeBrief &&
+      !keepBrief &&
+      !window.confirm(
+        'Starting this project will replace your current brief draft. Start the new project?',
+      )
+    )
+      return;
+    setAnswers(context);
+    setResult(recommend(context));
+    setSelected(study.service);
+    setIncludeBrief(false);
+    setReceipt(null);
+    setRestored(false);
+    setCopied(false);
+    request.current = null;
+    setBriefDraft(
+      keepBrief
+        ? { ...activeBrief, answers: context }
+        : destination === 'brief'
+          ? { answers: context, brief: createProjectBrief(study.service), step: 0 }
+          : null,
+    );
+    lastStudy.current = { study, source };
+    const type = destination === 'brief' ? 'brief_start' : 'inquiry_start';
+    const key = `${study.id}:${type}`;
+    if (!continuations.current.has(key)) {
+      trackCaseStudy({ caseStudyId: study.id, type, source });
+      continuations.current.add(key);
+    }
+    setRoute('#finder');
+    window.location.hash = 'finder';
+    go(destination === 'brief' ? 4 : 5);
+  }
 
   useEffect(() => {
     const updatedBrief =
@@ -188,10 +267,13 @@ export default function App() {
       initial.current = false;
       return;
     }
-    heading.current?.focus({ preventScroll: true });
+    if (exploringCases) return;
+    const currentHeading =
+      heading.current || panel.current?.querySelector<HTMLElement>('#question-heading');
+    currentHeading?.focus({ preventScroll: true });
     if (window.innerWidth < 900)
       panel.current?.scrollIntoView({ block: 'start', behavior: 'instant' });
-  }, [step]);
+  }, [step, exploringCases]);
 
   useEffect(() => {
     if (about) dialog.current?.showModal();
@@ -205,6 +287,8 @@ export default function App() {
     setStep(next);
   }
   function startOver() {
+    lastStudy.current = null;
+    continuations.current.clear();
     setBriefDraft(null);
     setIncludeBrief(false);
     setAnswers({ ...emptyAnswers });
@@ -218,26 +302,33 @@ export default function App() {
   }
   function openBrief() {
     if (!supportsProjectBrief(selected) || !parsedAnswers.success) return;
+    trackContinuation('brief_start');
     if (!activeBrief)
       setBriefDraft({ answers: parsedAnswers.data, brief: createProjectBrief(selected), step: 0 });
     go(4);
   }
   function pickGoal(id: DraftAnswers['goal']) {
-    setAnswers((a) => ({ ...a, goal: id, needs: a.goal === id ? a.needs : [] }));
+    setAnswers((a) => ({
+      ...a,
+      goal: id,
+      needs: a.goal === id ? a.needs : [],
+      sourceCaseStudyId: a.goal === id ? a.sourceCaseStudyId : undefined,
+    }));
     setRestored(false);
     setError('');
   }
   function toggleNeed(id: string) {
     setLimitMessage('');
     setAnswers((a) => {
-      if (a.needs.includes(id)) return { ...a, needs: a.needs.filter((n) => n !== id) };
-      if (id === 'unsure') return { ...a, needs: ['unsure'] };
+      if (a.needs.includes(id))
+        return { ...a, needs: a.needs.filter((n) => n !== id), sourceCaseStudyId: undefined };
+      if (id === 'unsure') return { ...a, needs: ['unsure'], sourceCaseStudyId: undefined };
       const current = a.needs.filter((n) => n !== 'unsure');
       if (current.length >= 3) {
         setLimitMessage('You’ve selected three priorities. Deselect one to choose another.');
         return a;
       }
-      return { ...a, needs: [...current, id] };
+      return { ...a, needs: [...current, id], sourceCaseStudyId: undefined };
     });
   }
   async function findSolution() {
@@ -304,6 +395,12 @@ export default function App() {
     const lines = [
       'CYNBIT · SOLUTION FINDER',
       'Independent assessment prototype',
+      ...(sourceStudy
+        ? [
+            `Inspired by demonstration: ${sourceStudy.title}`,
+            'Example context is editable; no client results are claimed.',
+          ]
+        : []),
       '',
       ...(receipt ? [`Demo reference: ${receipt.reference}`, ''] : []),
       `Suggested next step: ${brief.solution}`,
@@ -356,8 +453,19 @@ export default function App() {
 
   return (
     <>
-      <a className="skip-link" href="#finder">
-        Skip to solution finder
+      <a
+        className="skip-link"
+        href={exploringCases ? '#case-explorer' : '#finder'}
+        onClick={
+          exploringCases
+            ? (event) => {
+                event.preventDefault();
+                document.querySelector<HTMLElement>('#case-explorer h1')?.focus();
+              }
+            : undefined
+        }
+      >
+        Skip to {exploringCases ? 'case studies' : 'solution finder'}
       </a>
       <header className="site-header">
         <a className="brand" href="/" aria-label="Cynbit Solution Finder home">
@@ -375,7 +483,14 @@ export default function App() {
           </span>
         </a>
         <span className="header-divider" />
-        <span className="product-name">Solution finder</span>
+        <nav className="site-navigation" aria-label="Main navigation">
+          <a href="#finder" aria-current={!exploringCases ? 'page' : undefined}>
+            Solution finder
+          </a>
+          <a href="#case-studies" aria-current={exploringCases ? 'page' : undefined}>
+            Case studies
+          </a>
+        </nav>
         <div className="header-right">
           <button className="prototype-badge" onClick={() => setAbout(true)}>
             <span />
@@ -392,7 +507,15 @@ export default function App() {
         </div>
       </header>
 
-      <main className="shell">
+      <CaseStudyExplorer
+        route={route}
+        onStart={startSimilar}
+        onView={(study, source) => {
+          lastStudy.current = { study, source };
+        }}
+        hasRecommendation={!!result}
+      />
+      <main className="shell" hidden={exploringCases}>
         <div className="intro">
           <div>
             <p className="eyebrow">
@@ -489,6 +612,17 @@ export default function App() {
             aria-labelledby="question-heading"
             aria-busy={busy}
           >
+            {sourceStudy && step >= 3 && step < 6 && (
+              <div className="case-origin-note">
+                Inspired by a demonstration:{' '}
+                <a href={studyHref(sourceStudy)}>{sourceStudy.title}</a> Your selected service is{' '}
+                {solutions[selected].name}. Review the editable discovery context and add your own
+                project details.
+                <button className="inline-link" onClick={() => go(0)}>
+                  Review context
+                </button>
+              </div>
+            )}
             {restored && step < 3 && (
               <div className="restore-note">
                 <RotateCcw size={15} aria-hidden="true" />
@@ -779,6 +913,7 @@ export default function App() {
                     <ArrowRight size={14} aria-hidden="true" />
                   </button>
                 )}
+                <RecommendedStudies service={selected} priorities={answers.needs} />
                 {supportsProjectBrief(selected) && (
                   <div className="brief-entry">
                     <h3>Turn this direction into a project brief.</h3>
@@ -800,6 +935,7 @@ export default function App() {
                   <button
                     className="primary-button"
                     onClick={() => {
+                      trackContinuation('inquiry_start');
                       setIncludeBrief(false);
                       go(5);
                     }}
@@ -827,6 +963,7 @@ export default function App() {
                 onBack={() => go(3)}
                 onEditAnswers={() => go(0)}
                 onContinue={(brief) => {
+                  trackContinuation('inquiry_start');
                   setBriefDraft({ ...activeBrief, brief, step: 2 });
                   setIncludeBrief(true);
                   go(5);
@@ -1131,6 +1268,12 @@ export default function App() {
           . It does not promise pricing, availability, or outcomes.
         </p>
         <h3>Demo data</h3>
+        <p>
+          Case studies are clearly labeled fictional demonstrations. We count case-study views and
+          starts of a brief or inquiry in this prototype’s database. These events contain the
+          example, entry point, event type, time, and a random event identifier; they contain no
+          contact details or visitor identifier.
+        </p>
         <p>
           Your questionnaire and unfinished project brief answers are kept in this tab’s session
           storage so you can refresh and continue. Contact details are not saved in browser storage.

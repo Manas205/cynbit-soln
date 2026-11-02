@@ -15,7 +15,10 @@ export type BriefDraftEnvelope = z.infer<typeof envelopeSchema>;
 // Order of selected capabilities does not change project intent.
 export function sameBriefContext(left: Answers, right: Answers) {
   return (
-    sameBriefIntent(left, right) && left.stage === right.stage && left.timeline === right.timeline
+    sameBriefIntent(left, right) &&
+    left.stage === right.stage &&
+    left.timeline === right.timeline &&
+    left.sourceCaseStudyId === right.sourceCaseStudyId
   );
 }
 

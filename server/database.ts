@@ -34,6 +34,14 @@ export function openDatabase(path: string) {
     );
     CREATE INDEX IF NOT EXISTS inquiries_created_at ON inquiries(created_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS inquiries_solution ON inquiries(selected_solution);
+    CREATE TABLE IF NOT EXISTS case_study_events (
+      id TEXT PRIMARY KEY,
+      case_study_id TEXT NOT NULL,
+      event_type TEXT NOT NULL CHECK (event_type IN ('view', 'brief_start', 'inquiry_start')),
+      source TEXT NOT NULL CHECK (source IN ('gallery', 'recommendation')),
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS case_study_events_study ON case_study_events(case_study_id, event_type);
   `);
   return db;
 }

@@ -215,7 +215,9 @@ export default function ProjectBriefBuilder({
       </nav>
       <div className="brief-context">
         <div className="brief-section-heading">
-          <span className="eyebrow">FROM YOUR SOLUTION FINDER</span>
+          <span className="eyebrow">
+            {answers.sourceCaseStudyId ? 'YOUR STARTING CONTEXT' : 'FROM YOUR SOLUTION FINDER'}
+          </span>
           <button type="button" className="inline-link" onClick={onEditAnswers}>
             Edit answers
           </button>

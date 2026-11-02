@@ -138,6 +138,12 @@ export function projectBriefText(brief: ProjectBrief, answers: Answers, referenc
     ...(reference ? [`Demo reference: ${reference}`, ''] : []),
     `Selected solution: ${solutions[brief.solution].name}`,
     `Goal: ${goals.find((goal) => goal.id === answers.goal)!.title}`,
+    ...(answers.sourceCaseStudyId
+      ? [
+          `Starting example (demonstration): ${answers.sourceCaseStudyId}`,
+          'Example-derived context is editable. No client results are claimed.',
+        ]
+      : []),
     `Priorities: ${answers.needs.map((id) => needs[id].title).join('; ')}`,
     `Starting point: ${stages.find((s) => s.id === answers.stage)!.title}`,
     `Timeline: ${timelines.find((t) => t.id === answers.timeline)!.title}`,

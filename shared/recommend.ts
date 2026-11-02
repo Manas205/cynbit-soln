@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { projectBriefSchema } from './projectBrief.ts';
+import { caseStudyIdSchema, findCaseStudy } from './caseStudies.ts';
 import {
   goals,
   needs,
@@ -19,6 +20,7 @@ export const answersSchema = z
       .max(3, 'Choose up to three capabilities.'),
     stage: z.enum(['new', 'existing', 'exploring']),
     timeline: z.enum(['soon', 'quarter', 'research']),
+    sourceCaseStudyId: caseStudyIdSchema.optional(),
   })
   .strict()
   .superRefine((answers, ctx) => {
@@ -45,6 +47,7 @@ export type DraftAnswers = {
   needs: string[];
   stage?: Answers['stage'];
   timeline: Answers['timeline'];
+  sourceCaseStudyId?: string;
 };
 export interface Match {
   id: SolutionId;
@@ -118,6 +121,15 @@ export const inquirySchema = z
   })
   .strict()
   .superRefine((data, ctx) => {
+    if (
+      data.answers.sourceCaseStudyId &&
+      findCaseStudy(data.answers.sourceCaseStudyId)?.service !== data.selectedSolution
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['answers', 'sourceCaseStudyId'],
+        message: 'The starting example must match your selected service.',
+      });
     if (data.projectBrief && data.projectBrief.solution !== data.selectedSolution)
       ctx.addIssue({
         code: 'custom',

@@ -29,6 +29,8 @@ import {
 } from '../shared/admin.ts';
 import { BriefPreview } from './ProjectBriefBuilder.tsx';
 import './admin.css';
+import './caseStudies.css';
+import { findCaseStudy, type CaseStudyMetrics } from '../shared/caseStudies.ts';
 
 class AdminError extends Error {
   constructor(
@@ -298,6 +300,83 @@ function Login({
 
 type Filters = { q: string; status: string; solution: string; from: string; to: string };
 const emptyFilters: Filters = { q: '', status: '', solution: '', from: '', to: '' };
+function CaseStudyAnalytics({ revision, onExpired }: { revision: number; onExpired: () => void }) {
+  const [items, setItems] = useState<CaseStudyMetrics[] | null>(null);
+  const [error, setError] = useState('');
+  const [refresh, setRefresh] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setError('');
+    setItems(null);
+    request<{ items: CaseStudyMetrics[] }>('/case-study-analytics', { signal: controller.signal })
+      .then((data) => {
+        if (!controller.signal.aborted) setItems(data.items);
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          if (error instanceof AdminError && error.status === 401) onExpired();
+          else setError(errorText(error));
+        }
+      });
+    return () => controller.abort();
+  }, [revision, refresh, onExpired]);
+  return (
+    <section
+      className="case-analytics"
+      id="case-study-analytics"
+      aria-labelledby="case-analytics-title"
+    >
+      <div className="study-section-heading">
+        <h2 id="case-analytics-title">Case-study activity</h2>
+        <button className="admin-button" onClick={() => setRefresh((value) => value + 1)}>
+          Refresh activity
+        </button>
+      </div>
+      <p>
+        All-time recorded actions for demonstration content. Views count detail openings; starts
+        count transitions into a brief or inquiry after viewing an example. These are not unique
+        visitors or submitted inquiries. Blocked or offline analytics are not counted.
+      </p>
+      {error ? (
+        <p role="alert" className="admin-error">
+          {error}
+        </p>
+      ) : !items ? (
+        <p role="status">Loading case-study activity…</p>
+      ) : (
+        <div className="case-analytics-scroll">
+          <table>
+            <caption className="sr-only">Case-study views and continuation actions</caption>
+            <thead>
+              <tr>
+                <th scope="col">Example</th>
+                <th scope="col">Views</th>
+                <th scope="col">Brief starts</th>
+                <th scope="col">Inquiry starts</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.caseStudyId}>
+                  <th scope="row">
+                    <a href={`/#case-studies/${item.caseStudyId}`}>
+                      {findCaseStudy(item.caseStudyId)?.title || item.caseStudyId}
+                    </a>
+                    <small>Demonstration</small>
+                  </th>
+                  <td>{item.views}</td>
+                  <td>{item.briefStarts}</td>
+                  <td>{item.inquiryStarts}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function InboxDashboard({
   session,
   onExpired,
@@ -405,6 +484,10 @@ function InboxDashboard({
             <a href="/">
               <ArrowUpRight size={18} aria-hidden="true" />
               Solution Finder
+            </a>
+            <a href="#case-study-analytics">
+              <ArrowUpRight size={18} aria-hidden="true" />
+              Case-study activity
             </a>
           </nav>
           <div className="admin-sidebar-note">
@@ -724,6 +807,7 @@ function InboxDashboard({
             <span>Thoughtfully received. Clearly followed up.</span>
             <span>Demo submissions stay in this prototype.</span>
           </footer>
+          <CaseStudyAnalytics revision={revision} onExpired={onExpired} />
         </main>
       </div>
       {selected && (
@@ -932,6 +1016,15 @@ function InquiryViewer({
             </section>
             <section className="admin-detail-section">
               <h3>Discovery context</h3>
+              {item.answers.sourceCaseStudyId && (
+                <p className="case-origin-note">
+                  Starting example (demonstration):{' '}
+                  {findCaseStudy(item.answers.sourceCaseStudyId)?.title ||
+                    item.answers.sourceCaseStudyId}
+                  . The example supplies editable starting context; it is not a delivered client
+                  project.
+                </p>
+              )}
               <dl className="admin-detail-grid">
                 <div>
                   <dt>Business goal</dt>
