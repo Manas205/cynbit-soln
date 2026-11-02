@@ -1084,6 +1084,7 @@ export default function App() {
           <span>Thoughtfully matched. Clearly explained.</span>
           <div>
             <button onClick={() => setAbout(true)}>About this prototype</button>
+            <a href="/admin">Admin workspace</a>
             {step > 0 && step < 6 && (
               <button onClick={startOver} disabled={busy}>
                 <RotateCcw size={13} aria-hidden="true" />

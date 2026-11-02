@@ -23,5 +23,17 @@ export function openDatabase(path: string) {
   const columns = db.prepare('PRAGMA table_info(inquiries)').all();
   if (!columns.some((column) => column.name === 'project_brief_json'))
     db.exec('ALTER TABLE inquiries ADD COLUMN project_brief_json TEXT');
+  db.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE IF NOT EXISTS inquiry_management (
+      inquiry_id TEXT PRIMARY KEY REFERENCES inquiries(id),
+      status TEXT NOT NULL CHECK (status IN ('new', 'reviewing', 'contacted', 'closed')),
+      notes TEXT NOT NULL DEFAULT '',
+      version INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS inquiries_created_at ON inquiries(created_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS inquiries_solution ON inquiries(selected_solution);
+  `);
   return db;
 }

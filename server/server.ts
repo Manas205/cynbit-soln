@@ -4,18 +4,25 @@ import { dirname, resolve, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDatabase } from './database.ts';
 import { createApi } from './api.ts';
+import { existsSync } from 'node:fs';
+import { loadAdminCredentials } from './adminAuth.ts';
+import type { ViteDevServer } from 'vite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+if (existsSync(resolve(root, '.env'))) process.loadEnvFile(resolve(root, '.env'));
 const production = process.argv.includes('--production');
 const databasePath = process.env.DATABASE_PATH || resolve(root, 'data/inquiries.sqlite');
+const adminConfigPath = process.env.ADMIN_CONFIG_PATH || resolve(root, 'data/admin.json');
 await mkdir(dirname(databasePath), { recursive: true });
 const db = openDatabase(databasePath);
-const api = createApi(db);
-const vite = production
-  ? null
-  : await (
-      await import('vite')
-    ).createServer({ root, server: { middlewareMode: true }, appType: 'spa' });
+const api = createApi(db, {
+  credentials: await loadAdminCredentials(adminConfigPath),
+  secureCookies: process.env.ADMIN_SECURE_COOKIES
+    ? process.env.ADMIN_SECURE_COOKIES === 'true'
+    : production,
+  origin: process.env.ADMIN_ORIGIN,
+});
+let vite: ViteDevServer | null = null;
 const dist = resolve(root, 'dist');
 const types: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -70,11 +77,36 @@ const server = createServer(async (req, res) => {
     res.end('Not found');
   }
 });
+if (!production) {
+  vite = await (
+    await import('vite')
+  ).createServer({
+    root,
+    server: {
+      middlewareMode: true,
+      hmr: { server },
+      fs: {
+        // Keep private files inaccessible through Vite's development file server too.
+        deny: [
+          '.env',
+          '.env.*',
+          '*.{crt,pem}',
+          '**/.git/**',
+          '**/data/**',
+          '**/*.sqlite*',
+          resolve(adminConfigPath).replaceAll('\\', '/'),
+          `${resolve(databasePath).replaceAll('\\', '/')}*`,
+        ],
+      },
+    },
+    appType: 'spa',
+  });
+}
 const port = Number(process.env.PORT || 5173);
 const host = process.env.HOST || '127.0.0.1';
 server.listen(port, host, () =>
   console.log(
-    `Cynbit Solution Finder ready at http://${host}:${port} (${production ? 'production' : 'development'})`,
+    `Cynbit Solution Finder ready at http://${host}:${(server.address() as { port: number }).port} (${production ? 'production' : 'development'})`,
   ),
 );
 async function shutdown() {

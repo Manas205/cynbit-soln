@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "tsx server/server.ts",
+    "admin:setup": "tsx server/setupAdmin.ts",
     "build": "tsc --noEmit && vite build",
     "start": "tsx server/server.ts --production",
     "test": "node --import tsx --test tests/*.test.ts",

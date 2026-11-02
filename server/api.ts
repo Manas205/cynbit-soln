@@ -3,45 +3,11 @@ import type { DatabaseSync } from 'node:sqlite';
 import { createHash, randomBytes } from 'node:crypto';
 import { answersSchema, inquirySchema, recommend } from '../shared/recommend.ts';
 import { solutions } from '../shared/catalog.ts';
+import { body, HttpError, json } from './http.ts';
+import { createAdminApi, type AdminOptions } from './adminApi.ts';
 
-const MAX_BODY = 48_000;
-class HttpError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
-
-function json(res: ServerResponse, status: number, body: unknown) {
-  res.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store',
-  });
-  res.end(JSON.stringify(body));
-}
-
-async function body(req: IncomingMessage) {
-  if (!req.headers['content-type']?.startsWith('application/json'))
-    throw new HttpError(415, 'Send JSON data.');
-  if (Number(req.headers['content-length'] || 0) > MAX_BODY)
-    throw new HttpError(413, 'The request is too large.');
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += chunk.length;
-    if (size > MAX_BODY) throw new HttpError(413, 'The request is too large.');
-    chunks.push(Buffer.from(chunk));
-  }
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  } catch {
-    throw new HttpError(400, 'The request contains invalid JSON.');
-  }
-}
-
-export function createApi(db: DatabaseSync) {
+export function createApi(db: DatabaseSync, adminOptions: AdminOptions = {}) {
+  const admin = createAdminApi(db, adminOptions);
   const attempts = new Map<string, { count: number; resets: number }>();
   const lookup = db.prepare(
     'SELECT id, selected_solution, created_at, payload_hash FROM inquiries WHERE request_key = ?',
@@ -54,6 +20,7 @@ export function createApi(db: DatabaseSync) {
   return async function api(req: IncomingMessage, res: ServerResponse) {
     const path = new URL(req.url || '/', 'http://localhost').pathname;
     try {
+      if (path.startsWith('/api/admin/')) return await admin(req, res);
       if (req.method === 'GET' && path === '/api/health')
         return json(res, 200, { status: 'ok', mode: 'assessment-prototype' });
       if (!['/api/recommend', '/api/inquiries'].includes(path))
@@ -159,7 +126,9 @@ export function createApi(db: DatabaseSync) {
       if (error instanceof HttpError) return json(res, error.status, { error: error.message });
       console.error('Inquiry API failure:', error instanceof Error ? error.name : 'Unknown error');
       return json(res, 500, {
-        error: 'We couldn’t save this request. Your details are still here; please try again.',
+        error: path.startsWith('/api/admin/')
+          ? 'We couldn’t complete this request. Please try again.'
+          : 'We couldn’t save this request. Your details are still here; please try again.',
       });
     }
   };

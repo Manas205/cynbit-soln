@@ -49,6 +49,52 @@ The inquiry screen shows the attached brief and allows another review before sav
 
 Starting the updated server automatically adds the nullable `project_brief_json` column to an existing inquiry database. Existing records remain intact with a null brief. New briefs store their version, solution, and structured answers in that column; the original finder answers remain in `answers_json`. Restart any already-running server after updating so the migration and API changes take effect.
 
+## Admin Inquiry Dashboard
+
+Open **Admin workspace** in the Solution Finder footer, or visit `/admin` directly. The dashboard reads the same saved inquiries and project briefs as the public flow. It includes an inbox, contact details, both brief types, quick inquiries without a brief, discovery context, status totals, search, filters, and internal notes.
+
+### Create your local admin account
+
+From the project directory, run:
+
+```sh
+npm run admin:setup
+npm run dev
+```
+
+The setup command creates `admin@example.com` with a random password and displays that password once. Save it in your password manager. Only its salted scrypt hash is stored in `data/admin.json`, which is ignored by Git. To use another email, run `npm run admin:setup -- you@example.com`. Restart any running server after setup.
+
+To recover access, run `npm run admin:setup -- you@example.com --reset` and restart the server. This generates a new password and invalidates existing sessions when the server restarts. No account or default password is embedded in the frontend. Until configured, admin APIs are unavailable and the public Solution Finder continues working.
+
+### Review and follow up
+
+1. Sign in at `/admin`. Existing inquiries appear as **New**, including records created before this dashboard was added.
+2. Search by name, company, email, or reference. Combine solution, status, and received-date filters, then choose **Apply filters**. Date ranges include both selected dates in UTC; displayed timestamps use your browser’s local timezone.
+3. Open an inquiry to read the contact details, message, finder context, and attached software or automation brief.
+4. Choose **New**, **Reviewing**, **Contacted**, or **Closed**, add internal notes, and choose **Save changes**. These fields are stored separately from the original submission. Notes are limited to 5,000 characters.
+5. Use **Refresh inbox** to load new submissions. The four status totals cover all submissions, even when the list is filtered; each total also filters the inbox. Results use 20-item pages, newest first.
+
+The viewer warns before discarding unsaved edits. If another tab has saved a newer version, it rejects the stale update and offers to load the latest version. Save failures keep the current edits available for retry. Session expiry returns to sign-in and clears private dashboard data; unsaved edits are not persisted. Status changes and notes never send email or contact Cynbit.
+
+### Sessions and hosting
+
+Admin APIs use random, server-side sessions in an HttpOnly, SameSite=Strict cookie, an exact-origin check, and a session-bound CSRF token for changes and logout. Sessions expire after eight hours, are invalidated on logout or server restart, and are limited to 25 per process. Login accepts ten attempts per socket address in 15 minutes. Passwords and inquiry contents are not written to application logs or browser storage.
+
+The app reads an optional `.env` file at startup. For hosting, set `ADMIN_CONFIG_PATH` to a private persistent config file, or set both `ADMIN_EMAIL` and `ADMIN_PASSWORD_HASH` in your host’s environment (the environment takes precedence). The generated `data/admin.json` contains the hash in the required format. Never place these values in `VITE_*` variables or commit your admin config.
+
+Production mode defaults to Secure cookies and requires HTTPS for admin login. Behind an HTTPS reverse proxy, set `ADMIN_ORIGIN` to the exact browser-facing origin, such as `https://your-app.example.com`, without a trailing slash. For a local production preview over HTTP only, set `ADMIN_SECURE_COOKIES=false`. The app deliberately does not trust forwarded headers. This prototype supports one admin account and one Node process; multiple instances require shared session and rate-limit storage.
+
+### Admin API
+
+- `GET /api/admin/session`: whether admin access is configured; authenticated sessions also receive the admin email, CSRF token, and expiry.
+- `POST /api/admin/session`: JSON `{ email, password }`; requires a matching `Origin` header and sets the session cookie.
+- `DELETE /api/admin/session`: requires the session cookie, matching `Origin`, and `X-CSRF-Token`; revokes the session.
+- `GET /api/admin/inquiries`: authenticated inbox; optional `q`, `status`, `solution`, `from`, `to`, and `page` query parameters. Returns items, filtered total, current page, page size, and unfiltered status counts.
+- `GET /api/admin/inquiries/:reference`: authenticated inquiry details, including notes and the current edit version.
+- `PATCH /api/admin/inquiries/:reference`: JSON `{ status, notes, version }`; requires the cookie, matching `Origin`, and `X-CSRF-Token`. Returns the updated detail. A stale version returns 409 without changing anything.
+
+Startup creates the `inquiry_management` table and list indexes without modifying original inquiry fields. Existing records retain their briefs, references, contact details, and idempotency behavior.
+
 ## Matching model
 
 The catalog is in `shared/catalog.ts`; matching and validation are in `shared/recommend.ts`.
@@ -97,6 +143,8 @@ The same key with the same validated data returns the original receipt. Reusing 
 ## Tests
 
 `npm test` checks all offering routes, ambiguous needs, priority constraints, stale data, product tampering, consent/email validation, API persistence, duplicate prevention, cross-origin writes, request limits, and persistence across database reopening. Brief tests cover both service schemas, missing and oversized fields, mismatched solutions, draft recovery, context changes, exports, Unicode requests, retries after editing a brief, quick inquiries, and migration of an existing database. Tests use fictional data and an in-memory or temporary database.
+
+Admin tests cover unauthenticated access, disabled setup, password rejection, origin and CSRF checks, cookie flags, login throttling, session rotation/logout/expiry, full brief retrieval, validated updates, stale-edit conflicts, combined filters, pagination, and persistent notes. For manual verification, sign in, review both brief types and a quick inquiry, save a status and note, reopen it, exercise filters and empty results, check unsaved-edit warnings, and sign out. Repeat at a mobile viewport with keyboard navigation.
 
 For a manual check, complete one software and one automation brief; refresh partway through scope entry; edit a review section; change timing and confirm project answers remain; change solutions and confirm old questions clear; download the brief; submit fictional contact details; and check the confirmation. Repeat at a 390 px mobile viewport and use Tab/Shift+Tab to check focus and field errors.
 
