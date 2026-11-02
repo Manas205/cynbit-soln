@@ -1,0 +1,9 @@
+import { ArrowUpRight, Bell, Building2, ChartNoAxesCombined, Code2, Compass, FileText, GraduationCap, Layers3, MessageSquareText, SlidersHorizontal, Sparkles, Sprout, Target, Terminal, Users, Wallet, Workflow, Cloud, type LucideProps } from 'lucide-react';
+const icons: Record<string, React.ComponentType<LucideProps>> = {
+  sparkles: Sparkles, code: Code2, chart: ChartNoAxesCombined, building: Building2,
+  graduation: GraduationCap, compass: Compass, file: FileText, cloud: Cloud,
+  layers: Layers3, message: MessageSquareText, target: Target, wallet: Wallet,
+  users: Users, bell: Bell, workflow: Workflow, terminal: Terminal, sprout: Sprout,
+  sliders: SlidersHorizontal,
+};
+export function Icon({ name, ...props }: { name: string } & LucideProps) { const Component = icons[name] || ArrowUpRight; return <Component size={22} strokeWidth={1.7} aria-hidden="true" {...props} />; }
