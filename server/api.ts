@@ -4,7 +4,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { answersSchema, inquirySchema, recommend } from '../shared/recommend.ts';
 import { solutions } from '../shared/catalog.ts';
 
-const MAX_BODY = 24_000;
+const MAX_BODY = 48_000;
 class HttpError extends Error {
   constructor(
     public status: number,
@@ -48,8 +48,8 @@ export function createApi(db: DatabaseSync) {
   );
   const insert = db.prepare(`INSERT INTO inquiries (
     id, request_key, payload_hash, selected_solution, recommended_solution, catalog_version,
-    name, email, company, message, answers_json, consent_at, created_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    name, email, company, message, answers_json, consent_at, created_at, project_brief_json
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 
   return async function api(req: IncomingMessage, res: ServerResponse) {
     const path = new URL(req.url || '/', 'http://localhost').pathname;
@@ -147,6 +147,7 @@ export function createApi(db: DatabaseSync) {
         JSON.stringify(data.answers),
         createdAt,
         createdAt,
+        data.projectBrief ? JSON.stringify(data.projectBrief) : null,
       );
       return json(res, 201, {
         reference,

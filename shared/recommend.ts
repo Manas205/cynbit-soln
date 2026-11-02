@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { projectBriefSchema } from './projectBrief.ts';
 import {
   goals,
   needs,
@@ -112,10 +113,17 @@ export const inquirySchema = z
       .transform((v) => v.toLowerCase()),
     company: z.string().trim().max(120).default(''),
     message: z.string().trim().max(2000, 'Keep your message under 2,000 characters.').default(''),
+    projectBrief: projectBriefSchema.optional(),
     consent: z.literal(true, { error: 'Please confirm that this demo can store your inquiry.' }),
   })
   .strict()
   .superRefine((data, ctx) => {
+    if (data.projectBrief && data.projectBrief.solution !== data.selectedSolution)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['projectBrief', 'solution'],
+        message: 'The project brief must match your selected solution.',
+      });
     if (!answersSchema.safeParse(data.answers).success) return;
     const result = recommend(data.answers);
     const offered = [result.primary.id, ...result.alternatives.map((a) => a.id), 'discovery'];

@@ -20,5 +20,8 @@ export function openDatabase(path: string) {
       created_at TEXT NOT NULL
     );
   `);
+  const columns = db.prepare('PRAGMA table_info(inquiries)').all();
+  if (!columns.some((column) => column.name === 'project_brief_json'))
+    db.exec('ALTER TABLE inquiries ADD COLUMN project_brief_json TEXT');
   return db;
 }

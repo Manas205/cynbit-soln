@@ -91,7 +91,7 @@ test('inquiry API preserves intent, validates input, and handles retries safely'
       );
     });
     await t.test('oversized and malformed requests are rejected', async () => {
-      assert.equal((await send({ ...inquiry, message: 'x'.repeat(25_000) })).status, 413);
+      assert.equal((await send({ ...inquiry, message: 'x'.repeat(50_000) })).status, 413);
       const response = await fetch(`${url}/api/recommend`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -123,7 +123,7 @@ test('SQLite records survive closing and reopening the database', async () => {
   const path = join(directory, 'test.sqlite');
   let db = openDatabase(path);
   try {
-    db.prepare('INSERT INTO inquiries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    db.prepare('INSERT INTO inquiries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
       'test-ref',
       'test-key',
       'hash',
@@ -137,6 +137,7 @@ test('SQLite records survive closing and reopening the database', async () => {
       '{}',
       'now',
       'now',
+      null,
     );
     db.close();
     db = openDatabase(path);
