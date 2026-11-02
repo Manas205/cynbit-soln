@@ -1,6 +1,6 @@
 # Cynbit Solution Finder
 
-A standalone full-stack assessment prototype: three guided steps turn a visitor’s goals into an explained recommendation and a correctly categorized demo inquiry.
+A standalone full-stack assessment prototype: three guided steps turn a visitor’s goals into an explained recommendation, an optional tailored project brief, and a correctly categorized demo inquiry.
 
 ## Run locally
 
@@ -28,10 +28,26 @@ npm start
 - A discovery fallback for ambiguous or open-ended needs; ties are not presented as artificial confidence percentages.
 - Explanations, alternative options, links to the original offering, and a downloadable text brief.
 - Ability to edit previous answers. Changing the goal clears capabilities that would otherwise become stale.
-- Questionnaire recovery using session storage. Names and email addresses are never stored in browser storage.
+- Questionnaire and project brief recovery using session storage. Contact form fields are never stored in browser storage.
 - An accessible inquiry form carrying the selected solution and original answers into the API.
 - Client and server validation, SQLite persistence, idempotent retries, and a clear demo reference.
 - Responsive layouts, native form semantics, keyboard focus management, an accessible native information dialog, and reduced-motion support.
+
+## Project Brief Builder
+
+Choose **Build my project brief** after a software development or AI automation recommendation. The quick inquiry remains available for every solution.
+
+1. **The problem:** describe the business challenge and intended users. Software projects ask about the current system; automation projects ask about the existing process, task frequency, and tools.
+2. **Scope & success:** list must-haves, optional improvements, integrations, success criteria, and an optional budget range with currency. A blank budget appears as “Not sure yet”.
+3. **Review brief:** edit either section, download a text document, or continue to the inquiry form. The selected solution, finder priorities, starting point, and timeline travel with the brief.
+
+Unfinished project answers and progress recover after refreshing the same tab. Changing the goal, priorities, or selected solution clears the old project draft; changing only the starting point or timeline updates the context and keeps the project answers. Returning through discovery with unchanged answers preserves a selected alternative. Successful submission and “Start over” clear the tab’s saved draft. If browser storage is unavailable, the flow works in memory and explains that refresh recovery is unavailable. Contact details and consent are never saved in browser storage. Use fictional details in all free-text fields.
+
+The inquiry screen shows the attached brief and allows another review before saving. The confirmation download includes the saved reference. A quick inquiry deliberately excludes any optional project draft.
+
+### Database upgrade
+
+Starting the updated server automatically adds the nullable `project_brief_json` column to an existing inquiry database. Existing records remain intact with a null brief. New briefs store their version, solution, and structured answers in that column; the original finder answers remain in `answers_json`. Restart any already-running server after updating so the migration and API changes take effect.
 
 ## Matching model
 
@@ -57,17 +73,38 @@ This is an illustrative matching model, not a claim about Cynbit’s internal qu
 
 `POST /api/inquiries`: JSON `{ answers, selectedSolution, name, email, company, message, consent }`, with an `Idempotency-Key` UUID header → `{ reference, solution, receivedAt, prototype: true }`.
 
+This endpoint also accepts an optional `projectBrief`. Shared validation in `shared/projectBrief.ts` enforces the fields below, trims submitted text, and bounds field lengths. The brief’s `solution` must match `selectedSolution`, and that solution must be offered for the finder answers.
+
+```json
+{
+  "version": 1,
+  "solution": "software",
+  "problem": "Customer requests get lost in spreadsheets.",
+  "audience": "Our support team and managers",
+  "currentSystem": "Shared spreadsheets and email",
+  "mustHaves": "Create requests\nAssign owners\nTrack status",
+  "niceToHaves": "Weekly reports",
+  "integrations": "Zoho CRM",
+  "success": "Reduce manual tracking to under 15 minutes a day.",
+  "budget": ""
+}
+```
+
+For `solution: "ai-automation"`, replace `currentSystem` with `currentProcess`, `frequency`, and `tools`. Frequency is one of `daily`, `weekly`, `monthly`, `variable`, or `unsure`. Unknown fields and fields from the other service are rejected. Optional text values can be empty strings. The request body limit is 48,000 bytes to accommodate a complete brief with Unicode text.
+
 The same key with the same validated data returns the original receipt. Reusing a key with different data returns 409. Invalid data returns 400, unsupported content types 415, oversized requests 413, cross-origin browser writes 403, and too many new inquiries from the same socket address 429. There is no public endpoint to list stored inquiries. Database writes use parameterized statements.
 
 ## Tests
 
-`npm test` checks all offering routes, ambiguous needs, priority constraints, stale data, product tampering, consent/email validation, API persistence, duplicate prevention, cross-origin writes, request limits, and persistence across database reopening. Tests use fictional data and an in-memory or temporary database.
+`npm test` checks all offering routes, ambiguous needs, priority constraints, stale data, product tampering, consent/email validation, API persistence, duplicate prevention, cross-origin writes, request limits, and persistence across database reopening. Brief tests cover both service schemas, missing and oversized fields, mismatched solutions, draft recovery, context changes, exports, Unicode requests, retries after editing a brief, quick inquiries, and migration of an existing database. Tests use fictional data and an in-memory or temporary database.
+
+For a manual check, complete one software and one automation brief; refresh partway through scope entry; edit a review section; change timing and confirm project answers remain; change solutions and confirm old questions clear; download the brief; submit fictional contact details; and check the confirmation. Repeat at a 390 px mobile viewport and use Tab/Shift+Tab to check focus and field errors.
 
 ## Scope and integration
 
 No Cynbit source code or private APIs were used. This app runs independently. It does not contact Cynbit, send email, reserve appointments, or claim to modify the live website. The prototype is explicitly labeled, and its inquiry form requests fictional test details.
 
-For integration, add a “Find your solution” entry point to the public site, embed or mount the frontend, and adapt the submission repository to the existing lead-management system. Preserve the selected solution identifier, user-approved answers, consent timestamp, and catalog version end to end.
+For integration, add a “Find your solution” entry point to the public site, embed or mount the frontend, and adapt the submission repository to the existing lead-management system. Preserve the selected solution identifier, user-approved answers, optional versioned project brief, consent timestamp, and catalog version end to end.
 
 Before accepting real public inquiries, configure production data retention and access controls, use an appropriate managed database or persistent disk, add shared rate limiting and abuse protection, and obtain business approval for qualification rules and data-processing copy. The included rate limiter is process-local and uses the socket address; behind a proxy, all visitors may share that address. Do not trust forwarded IP headers without a trusted-proxy configuration.
 
