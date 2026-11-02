@@ -28,11 +28,26 @@ import {
   answersSchema,
   buildBrief,
   inquirySchema,
+  recommend,
   type Answers,
   type DraftAnswers,
   type Recommendation,
 } from '../shared/recommend.ts';
 import { Icon } from './icons.tsx';
+import ProjectBriefBuilder, { BriefPreview } from './ProjectBriefBuilder.tsx';
+import {
+  createProjectBrief,
+  projectBriefSchema,
+  projectBriefText,
+  supportsProjectBrief,
+} from '../shared/projectBrief.ts';
+import {
+  BRIEF_DRAFT_KEY,
+  readBriefDraft,
+  sameBriefContext,
+  sameBriefIntent,
+  type BriefDraftEnvelope,
+} from './briefDraft.ts';
 
 const DRAFT_KEY = 'cynbit-finder-answers-v1';
 const emptyAnswers: DraftAnswers = { needs: [], timeline: 'research' };
@@ -97,11 +112,23 @@ type Contact = { name: string; email: string; company: string; message: string; 
 const emptyContact: Contact = { name: '', email: '', company: '', message: '', consent: false };
 
 export default function App() {
+  const [initialBrief] = useState(() => {
+    const saved = readBriefDraft();
+    const finder = answersSchema.safeParse(readDraft());
+    return saved && finder.success && sameBriefIntent(saved.answers, finder.data)
+      ? { ...saved, answers: finder.data }
+      : null;
+  });
   const [answers, setAnswers] = useState<DraftAnswers>(readDraft);
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(initialBrief ? 4 : 0);
   const [restored, setRestored] = useState(() => !!readDraft().goal);
-  const [result, setResult] = useState<Recommendation | null>(null);
-  const [selected, setSelected] = useState<SolutionId>('discovery');
+  const [result, setResult] = useState<Recommendation | null>(() =>
+    initialBrief ? recommend(initialBrief.answers) : null,
+  );
+  const [selected, setSelected] = useState<SolutionId>(initialBrief?.brief.solution || 'discovery');
+  const [briefDraft, setBriefDraft] = useState<BriefDraftEnvelope | null>(initialBrief);
+  const [includeBrief, setIncludeBrief] = useState(false);
+  const [briefStorageAvailable, setBriefStorageAvailable] = useState(true);
   const [contact, setContact] = useState<Contact>({ ...emptyContact });
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [busy, setBusy] = useState(false);
@@ -115,10 +142,41 @@ export default function App() {
   const dialog = useRef<HTMLDialogElement>(null);
   const initial = useRef(true);
   const request = useRef<{ body: string; key: string } | null>(null);
+  const parsedAnswers = answersSchema.safeParse(answers);
+  const activeBrief =
+    briefDraft &&
+    parsedAnswers.success &&
+    briefDraft.brief.solution === selected &&
+    sameBriefIntent(briefDraft.answers, parsedAnswers.data)
+      ? briefDraft
+      : null;
+  const validatedBrief = projectBriefSchema.safeParse(activeBrief?.brief);
+  const attachedBrief = includeBrief && validatedBrief.success ? validatedBrief.data : undefined;
+
+  useEffect(() => {
+    const updatedBrief =
+      activeBrief &&
+      parsedAnswers.success &&
+      !sameBriefContext(activeBrief.answers, parsedAnswers.data)
+        ? { ...activeBrief, answers: parsedAnswers.data }
+        : activeBrief;
+    if (briefDraft && !activeBrief) {
+      setBriefDraft(null);
+      setIncludeBrief(false);
+    }
+    if (updatedBrief !== activeBrief) setBriefDraft(updatedBrief);
+    try {
+      if (!updatedBrief || step === 6) sessionStorage.removeItem(BRIEF_DRAFT_KEY);
+      else sessionStorage.setItem(BRIEF_DRAFT_KEY, JSON.stringify(updatedBrief));
+      setBriefStorageAvailable(true);
+    } catch {
+      setBriefStorageAvailable(false);
+    }
+  }, [briefDraft, activeBrief, answers, step]);
 
   useEffect(() => {
     try {
-      if (step === 5 || !answers.goal) sessionStorage.removeItem(DRAFT_KEY);
+      if (step === 6 || !answers.goal) sessionStorage.removeItem(DRAFT_KEY);
       else sessionStorage.setItem(DRAFT_KEY, JSON.stringify(answers));
     } catch {
       /* The finder works without browser storage. */
@@ -147,6 +205,8 @@ export default function App() {
     setStep(next);
   }
   function startOver() {
+    setBriefDraft(null);
+    setIncludeBrief(false);
     setAnswers({ ...emptyAnswers });
     setContact({ ...emptyContact });
     setResult(null);
@@ -155,6 +215,12 @@ export default function App() {
     setCopied(false);
     request.current = null;
     go(0);
+  }
+  function openBrief() {
+    if (!supportsProjectBrief(selected) || !parsedAnswers.success) return;
+    if (!activeBrief)
+      setBriefDraft({ answers: parsedAnswers.data, brief: createProjectBrief(selected), step: 0 });
+    go(4);
   }
   function pickGoal(id: DraftAnswers['goal']) {
     setAnswers((a) => ({ ...a, goal: id, needs: a.goal === id ? a.needs : [] }));
@@ -180,7 +246,8 @@ export default function App() {
     try {
       const response = await post<Recommendation>('/api/recommend', answers);
       setResult(response);
-      setSelected(response.primary.id);
+      const offered = [response.primary.id, ...response.alternatives.map((match) => match.id)];
+      setSelected(activeBrief && offered.includes(selected) ? selected : response.primary.id);
       setRestored(false);
       go(3);
     } catch (e) {
@@ -198,6 +265,7 @@ export default function App() {
       selectedSolution: selected,
       ...contact,
       email: contact.email.trim(),
+      ...(attachedBrief ? { projectBrief: attachedBrief } : {}),
     };
     const parsed = inquirySchema.safeParse(payload);
     if (!parsed.success) {
@@ -218,7 +286,7 @@ export default function App() {
       const saved = await post<Receipt>('/api/inquiries', parsed.data, request.current.key);
       setReceipt(saved);
       setContact({ ...emptyContact });
-      go(5);
+      go(6);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Please try again.');
       if (e instanceof ApiError) {
@@ -252,12 +320,17 @@ export default function App() {
       'This summary is a starting point, not a quote or a confirmed service agreement.',
       'No inquiry has been sent to Cynbit by this prototype.',
     ];
-    const url = URL.createObjectURL(
-      new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' }),
-    );
+    const fullBrief =
+      validatedBrief.success && (step === 4 || (step >= 5 && includeBrief))
+        ? validatedBrief.data
+        : undefined;
+    const text = fullBrief
+      ? projectBriefText(fullBrief, parsed.data, receipt?.reference)
+      : lines.join('\n');
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'my-cynbit-solution-brief.txt';
+    a.download = fullBrief ? 'my-cynbit-project-brief.txt' : 'my-cynbit-solution-brief.txt';
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
@@ -268,13 +341,18 @@ export default function App() {
   const otherMatches = availableMatches.filter((m) => m.id !== selected);
   const validStep =
     step === 0 ? !!answers.goal : step === 1 ? answers.needs.length > 0 : !!answers.stage;
-  const progressStep = Math.min(step, 3);
   const stepLabels = [
-    { title: 'Your goal', sub: 'What would you like to do?' },
-    { title: 'Your priorities', sub: 'The things that matter most.' },
-    { title: 'Your starting point', sub: 'A little more about you.' },
-    { title: 'Your recommendation', sub: 'A clearer way forward.' },
+    { step: 0, title: 'Your goal', sub: 'What would you like to do?' },
+    { step: 1, title: 'Your priorities', sub: 'The things that matter most.' },
+    { step: 2, title: 'Your starting point', sub: 'A little more about you.' },
+    { step: 3, title: 'Your recommendation', sub: 'A clearer way forward.' },
+    ...(supportsProjectBrief(selected)
+      ? [{ step: 4, title: 'Your project brief', sub: 'Shape the details. Optional.' }]
+      : []),
+    { step: 5, title: 'Your inquiry', sub: 'Review and send test details.' },
   ];
+  const progressStep =
+    step === 6 ? stepLabels.length - 1 : stepLabels.findIndex((item) => item.step === step);
 
   return (
     <>
@@ -328,7 +406,9 @@ export default function App() {
           <div className="time-note">
             <Clock3 size={17} aria-hidden="true" />
             <span>
-              3 questions <span className="dot-separator">·</span> About a minute
+              {step === 4 ? 'Project brief' : '3 discovery steps'}{' '}
+              <span className="dot-separator">·</span>{' '}
+              {step === 4 ? 'About 3–5 minutes' : 'About a minute'}
             </span>
           </div>
         </div>
@@ -337,12 +417,15 @@ export default function App() {
           <aside className="route-panel" aria-label="Your progress">
             <div className="route-top">
               <span className="eyebrow">YOUR ROUTE</span>
-              <span className="route-count">0{Math.min(step + 1, 4)} / 04</span>
+              <span className="route-count">
+                0{progressStep + 1} / 0{stepLabels.length}
+              </span>
             </div>
             <ol className="step-list">
               {stepLabels.map((item, index) => {
-                const done = index < progressStep || step === 5;
-                const canVisit = !busy && step !== 5 && index < progressStep;
+                const done =
+                  (index < progressStep && (item.step !== 4 || includeBrief)) || step === 6;
+                const canVisit = !busy && step !== 6 && index < progressStep;
                 return (
                   <li
                     key={item.title}
@@ -351,7 +434,7 @@ export default function App() {
                   >
                     <button
                       type="button"
-                      onClick={() => go(index)}
+                      onClick={() => (item.step === 4 ? openBrief() : go(item.step))}
                       disabled={!canVisit}
                       aria-label={`${done ? 'Edit' : 'Step ' + (index + 1) + ':'} ${item.title}`}
                     >
@@ -696,20 +779,65 @@ export default function App() {
                     <ArrowRight size={14} aria-hidden="true" />
                   </button>
                 )}
+                {supportsProjectBrief(selected) && (
+                  <div className="brief-entry">
+                    <h3>Turn this direction into a project brief.</h3>
+                    <p>
+                      Outline your problem, must-haves, and what success looks like. Review and
+                      download a brief you can bring to the first conversation.
+                    </p>
+                    <button className="primary-button" onClick={openBrief}>
+                      {activeBrief ? 'Continue my project brief' : 'Build my project brief'}{' '}
+                      <ArrowRight size={18} aria-hidden="true" />
+                    </button>
+                  </div>
+                )}
                 <div className="panel-actions result-actions">
                   <button className="text-button" onClick={downloadBrief}>
                     <Download size={16} aria-hidden="true" />
-                    Save my brief
+                    Save solution summary
                   </button>
-                  <button className="primary-button" onClick={() => go(4)}>
-                    Prepare an inquiry
+                  <button
+                    className="primary-button"
+                    onClick={() => {
+                      setIncludeBrief(false);
+                      go(5);
+                    }}
+                  >
+                    {supportsProjectBrief(selected)
+                      ? 'Continue with a quick inquiry'
+                      : 'Prepare an inquiry'}
                     <ArrowRight size={18} aria-hidden="true" />
                   </button>
                 </div>
               </>
             )}
 
-            {step === 4 && (
+            {step === 4 && activeBrief && (
+              <ProjectBriefBuilder
+                answers={activeBrief.answers}
+                draft={activeBrief.brief}
+                section={activeBrief.step}
+                onSectionChange={(section) =>
+                  setBriefDraft((current) => (current ? { ...current, step: section } : null))
+                }
+                onChange={(brief) =>
+                  setBriefDraft((current) => (current ? { ...current, brief } : null))
+                }
+                onBack={() => go(3)}
+                onEditAnswers={() => go(0)}
+                onContinue={(brief) => {
+                  setBriefDraft({ ...activeBrief, brief, step: 2 });
+                  setIncludeBrief(true);
+                  go(5);
+                }}
+                onDownload={downloadBrief}
+                storageAvailable={briefStorageAvailable}
+                restored={!!initialBrief}
+              />
+            )}
+
+            {step === 5 && (
               <>
                 <div className="panel-heading">
                   <div>
@@ -728,7 +856,7 @@ export default function App() {
                     <span className="eyebrow">YOUR SELECTED SOLUTION</span>
                     <strong>{solution.name}</strong>
                   </div>
-                  <button className="inline-link" onClick={() => go(3)}>
+                  <button className="inline-link" onClick={() => go(3)} disabled={busy}>
                     Change
                   </button>
                 </div>
@@ -739,6 +867,26 @@ export default function App() {
                     prototype only; no message is sent to Cynbit.
                   </p>
                 </div>
+                {attachedBrief && (
+                  <div className="brief-inquiry-card">
+                    <div className="brief-section-heading">
+                      <strong>Your project brief is attached</strong>
+                      <button
+                        type="button"
+                        className="inline-link"
+                        onClick={openBrief}
+                        disabled={busy}
+                      >
+                        Edit brief
+                      </button>
+                    </div>
+                    <p>Your project details will be saved with this inquiry.</p>
+                    <details>
+                      <summary>Review attached project brief</summary>
+                      <BriefPreview brief={attachedBrief} />
+                    </details>
+                  </div>
+                )}
                 <form onSubmit={submitInquiry} noValidate>
                   <div className="form-grid">
                     {(['name', 'email', 'company'] as const).map((field) => (
@@ -847,7 +995,7 @@ export default function App() {
                       type="button"
                       className="text-button"
                       disabled={busy}
-                      onClick={() => go(3)}
+                      onClick={() => (attachedBrief ? openBrief() : go(3))}
                     >
                       <ArrowLeft size={16} aria-hidden="true" />
                       Back
@@ -869,7 +1017,7 @@ export default function App() {
               </>
             )}
 
-            {step === 5 && receipt && (
+            {step === 6 && receipt && (
               <div className="success-view">
                 <div className="success-icon">
                   <Check size={36} strokeWidth={1.7} aria-hidden="true" />
@@ -879,7 +1027,9 @@ export default function App() {
                   Your demo inquiry is saved.
                 </h2>
                 <p className="success-copy">
-                  Your answers and selected solution are together in one brief.
+                  {attachedBrief
+                    ? 'Your project brief, answers, and selected solution were saved together.'
+                    : 'Your answers and selected solution are together in one brief.'}
                 </p>
                 <div className="receipt-card">
                   <span className="eyebrow">SELECTED SOLUTION</span>
@@ -934,7 +1084,7 @@ export default function App() {
           <span>Thoughtfully matched. Clearly explained.</span>
           <div>
             <button onClick={() => setAbout(true)}>About this prototype</button>
-            {step > 0 && step < 5 && (
+            {step > 0 && step < 6 && (
               <button onClick={startOver} disabled={busy}>
                 <RotateCcw size={13} aria-hidden="true" />
                 Start over
@@ -981,10 +1131,11 @@ export default function App() {
         </p>
         <h3>Demo data</h3>
         <p>
-          Your questionnaire answers are kept in this tab’s session storage so you can refresh and
-          continue. Contact details are not saved in browser storage. If you submit a demo inquiry,
-          the prototype saves the supplied details and answers in its own database. Use fictional
-          test details. Nothing is sent to Cynbit or an email provider.
+          Your questionnaire and unfinished project brief answers are kept in this tab’s session
+          storage so you can refresh and continue. Contact details are not saved in browser storage.
+          If you submit a demo inquiry, the prototype saves the supplied details, answers, and
+          attached project brief in its own database. Use fictional test details. Nothing is sent to
+          Cynbit or an email provider.
         </p>
         <p>
           Saved demo records remain until the prototype operator deletes or resets its database. The
